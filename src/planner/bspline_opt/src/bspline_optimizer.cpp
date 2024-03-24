@@ -6,7 +6,19 @@ namespace ego_planner
 {
 
   void BsplineOptimizer::setParam(ros::NodeHandle &nh)
-  {
+  { 
+    // 从参数服务器载入优化器的参数
+    // --------------------------------------------------------------
+    // 参数			变量名				默认值		取值
+    // --------------------------------------------------------------
+    // sommth权重		lambdal1_			-1.0		1.0
+    // safe权重		lambdal2_			-1.0		0.5
+    // feasible权重	lambdal3_			-1.0		0.1
+    // fitness权重		lambdal4_			-1.0		1.0
+    // 距离？			dist0_				-1.0		0.5
+    // 最大速度			max_vel_			-1.0		0.5
+    // 最大加速度		max_acc_			-1.0		6
+    // -------------------------------------------------------------
     nh.param("optimization/lambda_smooth", lambda1_, -1.0);
     nh.param("optimization/lambda_collision", lambda2_, -1.0);
     nh.param("optimization/lambda_feasibility", lambda3_, -1.0);

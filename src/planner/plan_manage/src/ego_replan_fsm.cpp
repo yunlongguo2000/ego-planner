@@ -2,16 +2,39 @@
 #include <plan_manage/ego_replan_fsm.h>
 
 namespace ego_planner
-{
+{ 
+  // 类之间的传递关系
+  //        	--------->visualization_
+  //       	|
+  // fsm----->						  				                 -------->grid_map_
+  //       	|		           		 				              |						                    ------>grid_map_
+  //      	--------->planner_manager_------------>	|------->bspline_optimizer_--->	|	
+  // 												                        |								                ------->a_star_							
+  // 												                         ------->visualization_	
 
   void EGOReplanFSM::init(ros::NodeHandle &nh)
-  {
+  { 
+    // 初始化参数，当前的路标点、进程状态、收到目标标志位、收到里程计数据标志位
     current_wp_ = 0;
     exec_state_ = FSM_EXEC_STATE::INIT;
     have_target_ = false;
     have_odom_ = false;
 
     /*  fsm param  */
+    // 从参数服务器载入状态机fsm的参数：
+    // ----------------------------------------------------------------------------------------------
+		// 参数			变量名						默认值		取值
+		// ----------------------------------------------------------------------------------------------
+		// 飞行模式			target_type				-1			1or2（1：选点，2：waypoint）
+		// 重规划时间阈值	thresh_replan				-1.0		1.0
+		// 停止规划距离		thresh_no_replan			-1.0		1.0
+		// 规划视界			planning_horizen			-1.0		6.0
+		// 规划时间视界		planning_horizen_time		-1.0		3.0
+		// 应急时间			emergency_time_				 1.0		1.0
+		// 路标点数量		waypoint_num				-1			>1
+		// 路标点xyz		waypoints_[i][j]			/			/
+		// ---------------------------------------------------------------------------------------------
+
     nh.param("fsm/flight_type", target_type_, -1);
     nh.param("fsm/thresh_replan", replan_thresh_, -1.0);
     nh.param("fsm/thresh_no_replan", no_replan_thresh_, -1.0);
@@ -28,27 +51,32 @@ namespace ego_planner
     }
 
     /* initialize main modules */
-    visualization_.reset(new PlanningVisualization(nh));
-    planner_manager_.reset(new EGOPlannerManager);
-    planner_manager_->initPlanModules(nh, visualization_);
+    visualization_.reset(new PlanningVisualization(nh)); // 初始化可视类指针：visualization_（构造函数）
+    planner_manager_.reset(new EGOPlannerManager); // 初始化规划管理器类指针：planner_manager_
+    planner_manager_->initPlanModules(nh, visualization_); // 从参数服务器初始化规划器参数PlanParameters pp_:
 
     /* callback */
+    // 创建定时器：exec_timer_，间隔10ms进入一次回调函数execFSMCallback()
     exec_timer_ = nh.createTimer(ros::Duration(0.01), &EGOReplanFSM::execFSMCallback, this);
+    // 创建定时器：safety_timer_，间隔50ms进入一次回调函数checkCollisionCallback()
     safety_timer_ = nh.createTimer(ros::Duration(0.05), &EGOReplanFSM::checkCollisionCallback, this);
 
-    odom_sub_ = nh.subscribe("/odom_world", 1, &EGOReplanFSM::odometryCallback, this);
+    odom_sub_ = nh.subscribe("/odom_world", 1, &EGOReplanFSM::odometryCallback, this); // 创建订阅者odmo_sub_，订阅里程计数据
 
+    // 创建发布者bspline_pub_，将traj_utils::Bsplines 类型数据发布到/planning/bspline话题上
     bspline_pub_ = nh.advertise<ego_planner::Bspline>("/planning/bspline", 10);
+    // 创建发布者data_disp_pub_，将traj_utils::DataDisp 类型数据发布到/planning/data_display话题上
     data_disp_pub_ = nh.advertise<ego_planner::DataDisp>("/planning/data_display", 100);
 
-    if (target_type_ == TARGET_TYPE::MANUAL_TARGET)
+    if (target_type_ == TARGET_TYPE::MANUAL_TARGET) // 飞行模式等于手动模式
+      // 创建订阅者waypoint_sub_，订阅路标点话题/move_base_simple/goal
       waypoint_sub_ = nh.subscribe("/waypoint_generator/waypoints", 1, &EGOReplanFSM::waypointCallback, this);
-    else if (target_type_ == TARGET_TYPE::PRESET_TARGET)
+    else if (target_type_ == TARGET_TYPE::PRESET_TARGET) // 飞行模式等于预设模式
     {
       ros::Duration(1.0).sleep();
       while (ros::ok() && !have_odom_)
         ros::spinOnce();
-      planGlobalTrajbyGivenWps();
+      planGlobalTrajbyGivenWps(); // 规划
     }
     else
       cout << "Wrong target_type_ value! target_type_=" << target_type_ << endl;
@@ -205,7 +233,7 @@ namespace ego_planner
     fsm_num++;
     if (fsm_num == 100)
     {
-      printFSMExecState();
+      printFSMExecState(); // 每秒打印一次当前状态
       if (!have_odom_)
         cout << "no odom." << endl;
       if (!trigger_)
@@ -215,7 +243,7 @@ namespace ego_planner
 
     switch (exec_state_)
     {
-    case INIT:
+    case INIT: // 初始状态，在状态机初始化的时候就被设置为INIT
     {
       if (!have_odom_)
       {

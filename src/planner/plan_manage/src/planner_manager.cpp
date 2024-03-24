@@ -11,9 +11,20 @@ namespace ego_planner
 
   EGOPlannerManager::~EGOPlannerManager() { std::cout << "des manager" << std::endl; }
 
+
   void EGOPlannerManager::initPlanModules(ros::NodeHandle &nh, PlanningVisualization::Ptr vis)
   {
     /* read algorithm parameters */
+    // --------------------------------------------------------------
+    // 参数			变量名						默认值		取值
+    // --------------------------------------------------------------
+    // 最大速度			max_vel						-1.0		0.5
+    // 最大加速度		max_acc						-1.0		6.0
+    // 最大加加速度		max_jerk					-1.0		4
+    // 可行公差？		feasibility_tolerance		 0.0		0.05
+    // 控制点距离		control_points_distance		-1.0		0.4
+    // 规划视界			planning_horizon			5.0			6
+    // ---------------------------------------------------------------
 
     nh.param("manager/max_vel", pp_.max_vel_, -1.0);
     nh.param("manager/max_acc", pp_.max_acc_, -1.0);
@@ -23,13 +34,16 @@ namespace ego_planner
     nh.param("manager/planning_horizon", pp_.planning_horizen_, 5.0);
 
     local_data_.traj_id_ = 0;
+    
+    // 初始化grid_map
     grid_map_.reset(new GridMap);
     grid_map_->initMap(nh);
 
+    // 初始化bspline_optimizer	曲线优化器
     bspline_optimizer_rebound_.reset(new BsplineOptimizer);
-    bspline_optimizer_rebound_->setParam(nh);
-    bspline_optimizer_rebound_->setEnvironment(grid_map_);
-    bspline_optimizer_rebound_->a_star_.reset(new AStar);
+    bspline_optimizer_rebound_->setParam(nh); // 从参数服务器载入优化器的参数
+    bspline_optimizer_rebound_->setEnvironment(grid_map_); // 配置地图
+    bspline_optimizer_rebound_->a_star_.reset(new AStar); // A*搜索
     bspline_optimizer_rebound_->a_star_->initGridMap(grid_map_, Eigen::Vector3i(100, 100, 100));
 
     visualization_ = vis;

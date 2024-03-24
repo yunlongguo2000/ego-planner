@@ -27,7 +27,7 @@ double time_forward_;
 void bsplineCallback(ego_planner::BsplineConstPtr msg)
 {
   // parse pos traj
-
+  // 收到轨迹，创建两个变量pos_pts konts分别接收geometry_msgs/Point[]类型的pos_pts 和时间变量konts
   Eigen::MatrixXd pos_pts(3, msg->pos_pts.size());
 
   Eigen::VectorXd knots(msg->knots.size());
@@ -43,6 +43,7 @@ void bsplineCallback(ego_planner::BsplineConstPtr msg)
     pos_pts(2, i) = msg->pos_pts[i].z;
   }
 
+  // 用收到的pos_pts，konts创建新的均匀B样条曲线pos_traj
   UniformBspline pos_traj(pos_pts, msg->order, 0.1);
   pos_traj.setKnot(knots);
 
@@ -55,20 +56,24 @@ void bsplineCallback(ego_planner::BsplineConstPtr msg)
 
   //UniformBspline yaw_traj(yaw_pts, msg->order, msg->yaw_dt);
 
-  start_time_ = msg->start_time;
-  traj_id_ = msg->traj_id;
+  start_time_ = msg->start_time; // 收到轨迹的成员变量:起始时间
+  traj_id_ = msg->traj_id; // 收到轨迹的成员变量:id
 
+  // 插入pos_traj及其一阶导、二阶导
   traj_.clear();
   traj_.push_back(pos_traj);
   traj_.push_back(traj_[0].getDerivative());
   traj_.push_back(traj_[1].getDerivative());
 
-  traj_duration_ = traj_[0].getTimeSum();
+  traj_duration_ = traj_[0].getTimeSum(); // 获取轨迹总时间
 
   receive_traj_ = true;
 }
 
 std::pair<double, double> calculate_yaw(double t_cur, Eigen::Vector3d &pos, ros::Time &time_now, ros::Time &time_last)
+// 参数：double t_cur，vector3d &pos ，ros::Time time_now ，ros::Time time_last
+// 功能：计算yaw角方向，变化率，并对输出进行限幅，把yaw输出限制在[-PI，PI]
+// 输出：pair of <yaw，yaw_dot>
 {
   constexpr double PI = 3.1415926;
   constexpr double YAW_DOT_MAX_PER_SEC = PI;
@@ -163,18 +168,21 @@ std::pair<double, double> calculate_yaw(double t_cur, Eigen::Vector3d &pos, ros:
 void cmdCallback(const ros::TimerEvent &e)
 {
   /* no publishing before receive traj_ */
+  // 如果没有收到轨迹，直接返回
   if (!receive_traj_)
     return;
 
   ros::Time time_now = ros::Time::now();
-  double t_cur = (time_now - start_time_).toSec();
+  double t_cur = (time_now - start_time_).toSec(); // 计算现在的时间和起始时间的间隔 t_cur = time_now-start_time_
 
   Eigen::Vector3d pos(Eigen::Vector3d::Zero()), vel(Eigen::Vector3d::Zero()), acc(Eigen::Vector3d::Zero()), pos_f;
   std::pair<double, double> yaw_yawdot(0, 0);
 
   static ros::Time time_last = ros::Time::now();
+  // 判断 t_cur  在不在总时间区间内，如果在，计算位置、速度、加速度、yaw，如果不在，hover
   if (t_cur < traj_duration_ && t_cur >= 0.0)
   {
+    // 计算当前t_cur的pos vel acc yaw(后面导航命令用)，再算一个pos_f(后面画轨迹用？)
     pos = traj_[0].evaluateDeBoorT(t_cur);
     vel = traj_[1].evaluateDeBoorT(t_cur);
     acc = traj_[2].evaluateDeBoorT(t_cur);
@@ -188,6 +196,7 @@ void cmdCallback(const ros::TimerEvent &e)
   }
   else if (t_cur >= traj_duration_)
   {
+    // 计算终点pos ，vel acc 设0，yaw不变；
     /* hover when finish traj_ */
     pos = traj_[0].evaluateDeBoorT(traj_duration_);
     vel.setZero();
@@ -203,6 +212,8 @@ void cmdCallback(const ros::TimerEvent &e)
     cout << "[Traj server]: invalid time." << endl;
   }
   time_last = time_now;
+
+  // 把pos vel acc yaw等信息装入cmd里，pos_cmd_pub 发布一次cmd到/position_cmd话题上
 
   cmd.header.stamp = time_now;
   cmd.header.frame_id = "world";
@@ -231,17 +242,19 @@ void cmdCallback(const ros::TimerEvent &e)
 
 int main(int argc, char **argv)
 {
-  ros::init(argc, argv, "traj_server");
+  ros::init(argc, argv, "traj_server"); // 创建节点  traj_server
   ros::NodeHandle node;
   ros::NodeHandle nh("~");
 
-  ros::Subscriber bspline_sub = node.subscribe("planning/bspline", 10, bsplineCallback);
+  ros::Subscriber bspline_sub = node.subscribe("planning/bspline", 10, bsplineCallback); // 订阅规划轨迹 ：planner/bspline
 
+  // 创建发布者：pos_cmd_pub ，往 /position_cmd 话题上发布 PositionCommand 类型的数据
   pos_cmd_pub = node.advertise<quadrotor_msgs::PositionCommand>("/position_cmd", 50);
 
-  ros::Timer cmd_timer = node.createTimer(ros::Duration(0.01), cmdCallback);
+  ros::Timer cmd_timer = node.createTimer(ros::Duration(0.01), cmdCallback); // 创建定时器，每0.01s调用一次cmdCallback
 
   /* control parameter */
+  // 在cmd指令里设置控制器增益系数
   cmd.kx[0] = pos_gain[0];
   cmd.kx[1] = pos_gain[1];
   cmd.kx[2] = pos_gain[2];
